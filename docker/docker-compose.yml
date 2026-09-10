@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  shardlock-node-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: shardlock-node-1
+    command:
+      - "--node-id=node-1"
+      - "--http-port=8001"
+      - "--peer-port=9001"
+      - "--peers=node-1:shardlock-node-1:9001,node-2:shardlock-node-2:9002,node-3:shardlock-node-3:9003"
+      - "--data-dir=/data/node-1"
+    ports:
+      - "8001:8001"
+      - "9001:9001"
+    volumes:
+      - shardlock_data_1:/data/node-1
+    networks:
+      - shardlock-net
+
+  shardlock-node-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: shardlock-node-2
+    command:
+      - "--node-id=node-2"
+      - "--http-port=8002"
+      - "--peer-port=9002"
+      - "--peers=node-1:shardlock-node-1:9001,node-2:shardlock-node-2:9002,node-3:shardlock-node-3:9003"
+      - "--data-dir=/data/node-2"
+    ports:
+      - "8002:8002"
+      - "9002:9002"
+    volumes:
+      - shardlock_data_2:/data/node-2
+    networks:
+      - shardlock-net
+
+  shardlock-node-3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: shardlock-node-3
+    command:
+      - "--node-id=node-3"
+      - "--http-port=8003"
+      - "--peer-port=9003"
+      - "--peers=node-1:shardlock-node-1:9001,node-2:shardlock-node-2:9002,node-3:shardlock-node-3:9003"
+      - "--data-dir=/data/node-3"
+    ports:
+      - "8003:8003"
+      - "9003:9003"
+    volumes:
+      - shardlock_data_3:/data/node-3
+    networks:
+      - shardlock-net
+
+volumes:
+  shardlock_data_1:
+  shardlock_data_2:
+  shardlock_data_3:
+
+networks:
+  shardlock-net:
+    driver: bridge
