@@ -1,4 +1,20 @@
-# ShardLock
+<p align="center">
+  <img src="docs/images/logo.png" alt="ShardLock Logo" width="130" style="border-radius: 24px;" />
+</p>
+
+<h1 align="center">ShardLock</h1>
+
+<p align="center">
+  <strong>Distributed consensus daemon and monotonic partition lease coordinator</strong><br>
+  Built on Java 21 LTS Virtual Threads, Raft-Lite consensus, and monotonic fencing tokens.
+</p>
+
+<p align="center">
+  <a href="https://github.com/alexandrmotologa/shardlock/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/java-21%20LTS-orange?style=flat-square" alt="Java 21 LTS">
+  <img src="https://img.shields.io/badge/consensus-Raft--Lite-0ea5e9?style=flat-square" alt="Consensus: Raft-Lite">
+</p>
 
 ShardLock is a distributed consensus daemon and partition lease coordinator written in Java 21 LTS. It uses a lightweight implementation of the Raft consensus algorithm to provide linearized locks and monotonic fencing tokens across a cluster.
 
@@ -80,6 +96,14 @@ java -jar shardlock-core/target/shardlock-core-1.0.0-SNAPSHOT.jar \
   --peers=node-1:127.0.0.1:9001,node-2:127.0.0.1:9002,node-3:127.0.0.1:9003 \
   --data-dir=./data/node-3
 ```
+
+## Live Dashboard & Observability
+ 
+Each node serves an embedded, zero-dependency visualizer running on Java 21 Virtual Threads with Server-Sent Events (SSE). It gives real-time visibility into Raft topology, leadership terms, active exclusive and shared partition leases, monotonic fencing tokens, and replication event logs:
+
+<p align="center">
+  <img src="docs/images/dashboard-preview.png" alt="ShardLock Live Cluster Dashboard Preview" width="100%" style="border-radius: 8px; border: 1px solid #1f2937;" />
+</p>
 
 Open `http://localhost:8001` in your browser to inspect the cluster visualizer.
 

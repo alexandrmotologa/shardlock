@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Squircle Clip -->
+    <clipPath id="squircle-clip">
+      <rect x="24" y="24" width="976" height="976" rx="220" />
+    </clipPath>
+
+    <!-- Electric Cyan Gradient -->
+    <linearGradient id="cyan-glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f5ff"/>
+      <stop offset="60%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <!-- Intense Eye Cyan Glow -->
+    <linearGradient id="eye-glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7df9ff"/>
+      <stop offset="50%" stop-color="#00f5ff"/>
+      <stop offset="100%" stop-color="#0077b6"/>
+    </linearGradient>
+
+    <!-- Collar Key Gradient -->
+    <linearGradient id="key-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#00f5ff"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+
+    <!-- Subtle Drop Shadow -->
+    <filter id="subtle-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0f172a" flood-opacity="0.14" />
+    </filter>
+
+    <!-- Subtle Ear Glow -->
+    <filter id="cyan-bloom" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Luxury White Squircle Container -->
+  <rect x="24" y="24" width="976" height="976" rx="220" fill="#ffffff" stroke="#e2e8f0" stroke-width="6" />
+
+  <g clip-path="url(#squircle-clip)">
+    <g transform="translate(512, 512)" filter="url(#subtle-shadow)">
+
+      <!-- Hexagonal Architectural Gateway (Consensus Ring Frame) -->
+      <polygon points="
+        0,-390
+        338,-195
+        338,195
+        0,390
+        -338,195
+        -338,-195
+      " fill="none" stroke="#0f172a" stroke-width="38" stroke-linejoin="round" />
+
+      <!-- Inner Telemetry Dashed Lattice Ring -->
+      <polygon points="
+        0,-355
+        307,-177
+        307,177
+        0,355
+        -307,177
+        -307,-177
+      " fill="none" stroke="#00f5ff" stroke-width="4" opacity="0.45" stroke-dasharray="16, 12" stroke-linejoin="round" />
+
+      <!-- Outer Gateway Corner Anchors -->
+      <circle cx="0" cy="-390" r="10" fill="#00f5ff" />
+      <circle cx="338" cy="-195" r="8" fill="#00f5ff" opacity="0.8" />
+      <circle cx="338" cy="195" r="8" fill="#00f5ff" opacity="0.8" />
+      <circle cx="0" cy="390" r="10" fill="#00f5ff" />
+      <circle cx="-338" cy="195" r="8" fill="#00f5ff" opacity="0.8" />
+      <circle cx="-338" cy="-195" r="8" fill="#00f5ff" opacity="0.8" />
+
+      <!-- ============================================================ -->
+      <!-- THE SENTINEL WOLF: LOW-POLY ORIGAMI MASCOT                   -->
+      <!-- ============================================================ -->
+
+      <!-- Base Body Silhouette Shadow Backing -->
+      <polygon points="
+        0,-270
+        50,-240 85,-230 150,-375 125,-215 155,-130 225,-20 270,70 235,145 275,190 185,200 205,315 105,365 0,385
+        -105,365 -205,315 -185,200 -275,190 -235,145 -270,70 -225,-20 -155,-130 -125,-215 -150,-375 -85,-230 -50,-240
+      " fill="#060911" />
+
+      <!-- EARS (Authentic Lupine Alert Upright Geometry) -->
+      <!-- Left Ear Outer Dark Flank -->
+      <polygon points="-85,-230 -150,-375 -125,-215" fill="#0f172a" />
+      <!-- Left Ear Inner Lit Facet -->
+      <polygon points="-50,-240 -150,-375 -85,-230" fill="#1e293b" />
+      <!-- Left Ear Cyan Core Neon Telemetry Accent -->
+      <polygon points="-65,-245 -140,-355 -92,-235" fill="url(#cyan-glow)" opacity="0.9" />
+
+      <!-- Right Ear Outer Dark Flank (In Shadow) -->
+      <polygon points="85,-230 150,-375 125,-215" fill="#090d16" />
+      <!-- Right Ear Inner Shadow Facet -->
+      <polygon points="50,-240 150,-375 85,-230" fill="#151d2a" />
+      <!-- Right Ear Cyan Core Neon Accent -->
+      <polygon points="65,-245 140,-355 92,-235" fill="url(#cyan-glow)" opacity="0.7" />
+
+      <!-- CROWN AND FOREHEAD -->
+      <!-- Central Crown Keystones -->
+      <polygon points="0,-270 0,-180 -50,-185 -50,-240" fill="#334155" />
+      <polygon points="0,-270 0,-180 50,-185 50,-240" fill="#1e293b" />
+
+      <!-- Forehead Upper Flanks -->
+      <polygon points="-50,-240 -50,-185 -125,-170 -125,-215" fill="#1e293b" />
+      <polygon points="50,-240 50,-185 125,-170 125,-215" fill="#0f172a" />
+
+      <!-- Mid Forehead Brow Ridge (Highlighted Plate) -->
+      <polygon points="0,-180 0,-95 -55,-100 -50,-185" fill="#475569" />
+      <polygon points="0,-180 0,-95 55,-100 50,-185" fill="#1e293b" />
+
+      <!-- Temple Facets Beside Brow -->
+      <polygon points="-50,-185 -55,-100 -130,-90 -125,-170" fill="#334155" />
+      <polygon points="50,-185 55,-100 130,-90 125,-170" fill="#151d2a" />
+
+      <!-- UPPER CHEEKS AND TEMPLE WINGS -->
+      <polygon points="-125,-170 -130,-90 -155,-130" fill="#1e293b" />
+      <polygon points="125,-170 130,-90 155,-130" fill="#0f172a" />
+
+      <polygon points="-130,-90 -225,-20 -155,-130" fill="#1e293b" />
+      <polygon points="130,-90 225,-20 155,-130" fill="#0b0f19" />
+
+      <polygon points="-130,-90 -165,30 -225,-20" fill="#334155" />
+      <polygon points="130,-90 165,30 225,-20" fill="#151d2a" />
+
+      <polygon points="-55,-100 -95,-35 -165,30 -130,-90" fill="#334155" />
+      <polygon points="55,-100 95,-35 165,30 130,-90" fill="#151d2a" />
+
+      <!-- EYE SOCKETS AND SENTINEL CYAN OPTICS -->
+      <!-- Left Eye Dark Bezel -->
+      <polygon points="-55,-100 -95,-35 -48,-48" fill="#080c14" />
+      <!-- Left Eye Cyan Jewel Facet -->
+      <polygon points="-52,-90 -90,-42 -52,-52" fill="url(#eye-glow)" stroke="#00f5ff" stroke-width="1.5" />
+      <!-- Left Eye Glint -->
+      <polygon points="-64,-68 -68,-63 -64,-58 -60,-63" fill="#ffffff" opacity="0.95" />
+
+      <!-- Right Eye Dark Bezel -->
+      <polygon points="55,-100 95,-35 48,-48" fill="#080c14" />
+      <!-- Right Eye Cyan Jewel Facet -->
+      <polygon points="52,-90 90,-42 52,-52" fill="url(#eye-glow)" stroke="#00f5ff" stroke-width="1.5" />
+      <!-- Right Eye Glint -->
+      <polygon points="64,-68 68,-63 64,-58 60,-63" fill="#ffffff" opacity="0.95" />
+
+      <!-- NOSE BRIDGE AND MUZZLE (Pronounced Wolf Snout) -->
+      <!-- Bridge Ridge Top (Key Light) -->
+      <polygon points="0,-95 0,-10 -48,-48" fill="#64748b" />
+      <polygon points="0,-95 0,-10 48,-48" fill="#334155" />
+
+      <!-- Mid Snout Facets -->
+      <polygon points="0,-10 0,75 -38,55 -48,-48" fill="#475569" />
+      <polygon points="0,-10 0,75 38,55 48,-48" fill="#1e293b" />
+
+      <!-- Snout Outer Slants -->
+      <polygon points="-48,-48 -95,-35 -92,45 -38,55" fill="#334155" />
+      <polygon points="48,-48 95,-35 92,45 38,55" fill="#151d2a" />
+
+      <!-- Muzzle Cheek Bevels -->
+      <polygon points="-95,-35 -165,30 -140,85 -92,45" fill="#1e293b" />
+      <polygon points="95,-35 165,30 140,85 92,45" fill="#0f172a" />
+
+      <!-- Nose Bridge Bottom to Leather -->
+      <polygon points="0,75 0,115 -32,105 -38,55" fill="#334155" />
+      <polygon points="0,75 0,115 32,105 38,55" fill="#1e293b" />
+
+      <!-- Lupine Nose Leather (Black Geometric Keystone) -->
+      <polygon points="0,115 -30,128 0,146 30,128" fill="#020617" stroke="#00f5ff" stroke-width="1" />
+      <polygon points="0,115 -30,128 0,132" fill="#1e293b" />
+      <polygon points="0,115 30,128 0,132" fill="#0b0f19" />
+      <!-- Nostril Accents -->
+      <ellipse cx="-12" cy="130" rx="3" ry="1.5" fill="#020617" />
+      <ellipse cx="12" cy="130" rx="3" ry="1.5" fill="#020617" />
+
+      <!-- Upper Lips / Whisker Pads -->
+      <polygon points="-38,55 -92,45 -55,140 -30,128" fill="#475569" />
+      <polygon points="38,55 92,45 55,140 30,128" fill="#1e293b" />
+
+      <!-- Chin & Lower Jaw -->
+      <polygon points="0,146 -26,188 0,205" fill="#1e293b" />
+      <polygon points="0,146 26,188 0,205" fill="#0f172a" />
+      <polygon points="-30,128 0,146 -26,188 -55,140" fill="#334155" />
+      <polygon points="30,128 0,146 26,188 55,140" fill="#151d2a" />
+
+      <!-- CHEEK RUFFS & FLARED JOWL TUFTS (Aggressive Lupine Contour) -->
+      <polygon points="-225,-20 -270,70 -165,30" fill="#1e293b" />
+      <polygon points="225,-20 270,70 165,30" fill="#0b0f19" />
+
+      <polygon points="-270,70 -235,145 -145,100 -165,30" fill="#334155" />
+      <polygon points="270,70 235,145 145,100 165,30" fill="#151d2a" />
+
+      <polygon points="-235,145 -275,190 -185,200 -145,100" fill="#1e293b" />
+      <polygon points="235,145 275,190 185,200 145,100" fill="#090d16" />
+
+      <polygon points="-145,100 -185,200 -105,195 -55,140" fill="#334155" />
+      <polygon points="145,100 185,200 105,195 55,140" fill="#1e293b" />
+
+      <!-- COLLAR GORGET AND MONOTONIC FENCING TOKEN KEY EMBLEM -->
+      <!-- Throat Flanks -->
+      <polygon points="-26,188 -105,195 -135,275 -55,285" fill="#1e293b" />
+      <polygon points="26,188 105,195 135,275 55,285" fill="#0f172a" />
+
+      <!-- Central Hexagonal Collar Medallion (The Partition Lease Token) -->
+      <polygon points="
+        0,205
+        -55,235
+        -55,305
+        0,335
+        55,305
+        55,235
+      " fill="#070a12" stroke="#00f5ff" stroke-width="2.5" stroke-linejoin="round" />
+
+      <!-- Monotonic Lease Token Core (Hexagon Jewel) -->
+      <polygon points="
+        0,240
+        -25,255
+        -25,285
+        0,300
+        25,285
+        25,255
+      " fill="url(#key-gradient)" stroke="#00f5ff" stroke-width="1.5" />
+
+      <!-- Negative Space Partition Lock Keyhole (Subtle CS Metaphor) -->
+      <!-- Keyhole Head -->
+      <circle cx="0" cy="265" r="6" fill="#070a12" />
+      <!-- Keyhole Downward Fencing Slot -->
+      <polygon points="-3,265 3,265 4.5,288 -4.5,288" fill="#070a12" />
+
+      <!-- Outer Collar Armor Wings -->
+      <polygon points="-135,275 -205,315 -105,365 -55,305" fill="#151d2a" />
+      <polygon points="135,275 205,315 105,365 55,305" fill="#090d16" />
+
+      <!-- Bottom Keel Plate -->
+      <polygon points="0,335 -55,305 -105,365 0,385" fill="#334155" />
+      <polygon points="0,335 55,305 105,365 0,385" fill="#1e293b" />
+
+      <!-- PRECISION WIREFRAME EDGES (Subtle High-Tech Polish) -->
+      <g stroke="#38bdf8" stroke-width="0.8" opacity="0.25" fill="none" stroke-linejoin="round">
+        <line x1="0" y1="-270" x2="0" y2="75" />
+        <line x1="-50" y1="-240" x2="-50" y2="-185" />
+        <line x1="50" y1="-240" x2="50" y2="-185" />
+        <line x1="-50" y1="-185" x2="0" y2="-180" />
+        <line x1="50" y1="-185" x2="0" y2="-180" />
+        <line x1="-55" y1="-100" x2="0" y2="-95" />
+        <line x1="55" y1="-100" x2="0" y2="-95" />
+        <line x1="-48" y1="-48" x2="0" y2="-10" />
+        <line x1="48" y1="-48" x2="0" y2="-10" />
+        <line x1="-38" y1="55" x2="0" y2="75" />
+        <line x1="38" y1="55" x2="0" y2="75" />
+      </g>
+
+    </g>
+  </g>
+</svg>

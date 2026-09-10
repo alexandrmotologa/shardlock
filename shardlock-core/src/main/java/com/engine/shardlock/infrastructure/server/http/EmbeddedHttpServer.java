@@ -40,6 +40,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
     private final ObjectMapper mapper = new ObjectMapper();
 
     private final List<OutputStream> sseClients = new CopyOnWriteArrayList<>();
+    private final java.util.Deque<byte[]> recentEvents = new java.util.concurrent.ConcurrentLinkedDeque<>();
     private final AtomicBoolean running = new AtomicBoolean(true);
 
     public EmbeddedHttpServer(
@@ -77,6 +78,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
         server.createContext("/api/v1/locks", this::handleListLocks);
         server.createContext("/api/v1/cluster/events", this::handleSseEvents);
         server.createContext("/metrics", this::handleMetrics);
+        server.createContext("/logo.png", this::handleLogo);
         server.createContext("/", this::handleDashboard);
     }
 
@@ -363,14 +365,15 @@ public class EmbeddedHttpServer implements AutoCloseable {
         // Send initial connect ping
         String initData = "data: {\"event\": \"CONNECTED\", \"nodeId\": \"" + consensusEngine.nodeId().value() + "\"}\n\n";
         os.write(initData.getBytes(StandardCharsets.UTF_8));
+        for (byte[] ev : recentEvents) {
+            try {
+                os.write(ev);
+            } catch (IOException ignored) {}
+        }
         os.flush();
     }
 
     public synchronized void publishEvent(RaftDomainEvent event) {
-        if (sseClients.isEmpty()) {
-            return;
-        }
-
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("eventType", event.getClass().getSimpleName());
@@ -407,6 +410,15 @@ public class EmbeddedHttpServer implements AutoCloseable {
             String message = "data: " + mapper.writeValueAsString(payload) + "\n\n";
             byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
 
+            recentEvents.add(bytes);
+            while (recentEvents.size() > 20) {
+                recentEvents.pollFirst();
+            }
+
+            if (sseClients.isEmpty()) {
+                return;
+            }
+
             List<OutputStream> dead = new ArrayList<>();
             for (OutputStream os : sseClients) {
                 try {
@@ -433,6 +445,33 @@ public class EmbeddedHttpServer implements AutoCloseable {
         exchange.sendResponseHeaders(200, html.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(html);
+        }
+    }
+
+    private void handleLogo(HttpExchange exchange) throws IOException {
+        addCorsHeaders(exchange);
+        byte[] bytes = null;
+        try (var is = getClass().getResourceAsStream("/logo.png")) {
+            if (is != null) {
+                bytes = is.readAllBytes();
+            }
+        } catch (Exception ignored) {}
+
+        if (bytes == null) {
+            java.nio.file.Path p = java.nio.file.Paths.get("docs/images/logo.png");
+            if (java.nio.file.Files.exists(p)) {
+                bytes = java.nio.file.Files.readAllBytes(p);
+            }
+        }
+
+        if (bytes != null) {
+            exchange.getResponseHeaders().set("Content-Type", "image/png");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        } else {
+            exchange.sendResponseHeaders(404, -1);
         }
     }
 
@@ -530,12 +569,15 @@ public class EmbeddedHttpServer implements AutoCloseable {
 </head>
 <body>
   <header>
-    <div>
-      <h1>ShardLock Cluster Monitor</h1>
-      <p style="font-size: 13px; color: #6b7280; margin-top: 2px;">
-        Linearizable Lease Coordinator with Monotonic Fencing Tokens &bull;
-        <a href="/metrics" target="_blank" style="color:var(--accent); text-decoration:none;">Prometheus Metrics</a>
-      </p>
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <img src="/logo.png" width="46" height="46" style="border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,0.4);" alt="ShardLock Sentinel Logo">
+      <div>
+        <h1>ShardLock Cluster Monitor</h1>
+        <p style="font-size: 13px; color: #6b7280; margin-top: 2px;">
+          Linearizable Lease Coordinator with Monotonic Fencing Tokens &bull;
+          <a href="/metrics" target="_blank" style="color:var(--accent); text-decoration:none;">Prometheus Metrics</a>
+        </p>
+      </div>
     </div>
     <div id="role-badge" class="status-badge role-FOLLOWER">CONNECTING...</div>
   </header>
@@ -579,7 +621,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
 
   <div class="grid">
     <div class="card" style="grid-column: 1 / -1;">
-      <h2>Active Partition Leases (<span id="lock-count">0</span>)</h2>
+      <h2><span>Active Partition Leases</span> <span class="token-badge" id="lock-count">0 active</span></h2>
       <table>
         <thead>
           <tr>
@@ -626,7 +668,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
         const res = await fetch('/api/v1/locks');
         if (!res.ok) return;
         const locks = await res.json();
-        document.getElementById('lock-count').textContent = locks.length;
+        document.getElementById('lock-count').textContent = locks.length + ' Active Leases';
         const tbody = document.getElementById('locks-body');
         if (locks.length === 0) {
           tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#6b7280;">No active leases held</td></tr>';
