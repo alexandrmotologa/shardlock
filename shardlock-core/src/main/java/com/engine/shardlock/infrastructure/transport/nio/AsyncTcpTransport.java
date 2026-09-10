@@ -31,6 +31,8 @@ public class AsyncTcpTransport implements TransportPort {
     private static final short TYPE_VOTE_RESP = 0x0002;
     private static final short TYPE_APPEND_REQ = 0x0003;
     private static final short TYPE_APPEND_RESP = 0x0004;
+    private static final short TYPE_PRE_VOTE_REQ = 0x0005;
+    private static final short TYPE_PRE_VOTE_RESP = 0x0006;
 
     private final NodeId localNodeId;
     private final int port;
@@ -108,6 +110,11 @@ public class AsyncTcpTransport implements TransportPort {
                     RequestVoteResult result = rpcHandler.handleRequestVote(dto.toDomain());
                     byte[] respPayload = mapper.writeValueAsBytes(RequestVoteResultDto.fromDomain(result));
                     sendFrame(out, TYPE_VOTE_RESP, correlationId, respPayload);
+                } else if (type == TYPE_PRE_VOTE_REQ) {
+                    RequestVoteArgsDto dto = mapper.readValue(json, RequestVoteArgsDto.class);
+                    RequestVoteResult result = rpcHandler.handlePreVote(dto.toDomain());
+                    byte[] respPayload = mapper.writeValueAsBytes(RequestVoteResultDto.fromDomain(result));
+                    sendFrame(out, TYPE_PRE_VOTE_RESP, correlationId, respPayload);
                 } else if (type == TYPE_APPEND_REQ) {
                     AppendEntriesArgsDto dto = mapper.readValue(json, AppendEntriesArgsDto.class);
                     AppendEntriesResult result = rpcHandler.handleAppendEntries(dto.toDomain());
@@ -140,6 +147,15 @@ public class AsyncTcpTransport implements TransportPort {
 
     @Override
     public CompletableFuture<RequestVoteResult> sendRequestVote(NodeId destination, RequestVoteArgs args) {
+        return sendVoteInternal(destination, args, TYPE_VOTE_REQ);
+    }
+
+    @Override
+    public CompletableFuture<RequestVoteResult> sendPreVote(NodeId destination, RequestVoteArgs args) {
+        return sendVoteInternal(destination, args, TYPE_PRE_VOTE_REQ);
+    }
+
+    private CompletableFuture<RequestVoteResult> sendVoteInternal(NodeId destination, RequestVoteArgs args, short frameType) {
         CompletableFuture<RequestVoteResult> future = new CompletableFuture<>();
         long correlationId = correlationCounter.incrementAndGet();
         pendingRequests.put(correlationId, future);
@@ -147,7 +163,7 @@ public class AsyncTcpTransport implements TransportPort {
         try {
             byte[] payload = mapper.writeValueAsBytes(RequestVoteArgsDto.fromDomain(args));
             PeerConnection conn = getOrCreateConnection(destination);
-            conn.send(TYPE_VOTE_REQ, correlationId, payload);
+            conn.send(frameType, correlationId, payload);
         } catch (Exception e) {
             pendingRequests.remove(correlationId);
             future.completeExceptionally(e);
@@ -255,7 +271,7 @@ public class AsyncTcpTransport implements TransportPort {
 
                     CompletableFuture<?> future = pendingRequests.remove(correlationId);
                     if (future != null) {
-                        if (type == TYPE_VOTE_RESP) {
+                        if (type == TYPE_VOTE_RESP || type == TYPE_PRE_VOTE_RESP) {
                             RequestVoteResultDto dto = mapper.readValue(json, RequestVoteResultDto.class);
                             ((CompletableFuture<RequestVoteResult>) future).complete(dto.toDomain());
                         } else if (type == TYPE_APPEND_RESP) {

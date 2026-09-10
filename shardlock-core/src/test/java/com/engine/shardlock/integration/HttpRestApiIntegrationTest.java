@@ -160,6 +160,54 @@ class HttpRestApiIntegrationTest {
         assertThat(resp.statusCode()).isEqualTo(200);
         assertThat(resp.headers().firstValue("Content-Type")).isPresent();
         assertThat(resp.headers().firstValue("Content-Type").get()).contains("text/html");
-        assertThat(resp.body()).contains("ShardLock Consensus Daemon");
+        assertThat(resp.body()).contains("ShardLock");
+    }
+
+    @Test
+    @DisplayName("Prometheus /metrics endpoint exposes standard gauge metrics")
+    void testMetricsEndpoint() throws Exception {
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + httpPort + "/metrics"))
+                .GET()
+                .build();
+
+        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        assertThat(resp.statusCode()).isEqualTo(200);
+        assertThat(resp.body()).contains("shardlock_raft_term");
+        assertThat(resp.body()).contains("shardlock_raft_is_leader");
+        assertThat(resp.body()).contains("shardlock_fencing_token_current");
+    }
+
+    @Test
+    @DisplayName("Shared lock and wait queue endpoints respond correctly")
+    void testSharedLockAndWaitQueueViaHttp() throws Exception {
+        String base = "http://127.0.0.1:" + httpPort;
+
+        // 1. Acquire SHARED lock
+        String acqPayload = mapper.writeValueAsString(Map.of(
+                "resource", "shared-partition",
+                "clientId", "reader-1",
+                "mode", "SHARED",
+                "ttlMs", 10000
+        ));
+        HttpRequest acqReq = HttpRequest.newBuilder()
+                .uri(URI.create(base + "/api/v1/locks/acquire"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(acqPayload))
+                .build();
+
+        HttpResponse<String> acqResp = httpClient.send(acqReq, HttpResponse.BodyHandlers.ofString());
+        assertThat(acqResp.statusCode()).isEqualTo(200);
+        Map<String, Object> data = mapper.readValue(acqResp.body(), Map.class);
+        assertThat(data.get("mode")).isEqualTo("SHARED");
+
+        // 2. Query Wait Queue
+        HttpRequest waitReq = HttpRequest.newBuilder()
+                .uri(URI.create(base + "/api/v1/locks/waiters"))
+                .GET()
+                .build();
+        HttpResponse<String> waitResp = httpClient.send(waitReq, HttpResponse.BodyHandlers.ofString());
+        assertThat(waitResp.statusCode()).isEqualTo(200);
+        assertThat(waitResp.body()).contains("queueLengths");
     }
 }

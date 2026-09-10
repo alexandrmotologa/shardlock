@@ -6,5 +6,6 @@ package com.engine.shardlock.domain.model;
 public enum NodeRole {
     LEADER,
     FOLLOWER,
-    CANDIDATE
+    CANDIDATE,
+    PRE_CANDIDATE
 }

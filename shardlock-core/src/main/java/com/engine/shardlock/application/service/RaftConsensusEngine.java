@@ -43,6 +43,9 @@ public class RaftConsensusEngine implements TransportPort.RaftRpcHandler {
     private long electionTimeoutMs;
     private final Random random = new Random();
 
+    private final int snapshotThreshold;
+    private long entriesAppliedSinceSnapshot = 0;
+
     public RaftConsensusEngine(
             NodeId nodeId,
             Set<NodeId> peers,
@@ -51,12 +54,25 @@ public class RaftConsensusEngine implements TransportPort.RaftRpcHandler {
             ClockPort clock,
             Consumer<RaftDomainEvent> eventPublisher
     ) {
+        this(nodeId, peers, storage, transport, clock, eventPublisher, 500);
+    }
+
+    public RaftConsensusEngine(
+            NodeId nodeId,
+            Set<NodeId> peers,
+            StoragePort storage,
+            TransportPort transport,
+            ClockPort clock,
+            Consumer<RaftDomainEvent> eventPublisher,
+            int snapshotThreshold
+    ) {
         this.nodeId = Objects.requireNonNull(nodeId);
         this.peers = Set.copyOf(peers);
         this.storage = Objects.requireNonNull(storage);
         this.transport = Objects.requireNonNull(transport);
         this.clock = Objects.requireNonNull(clock);
         this.eventPublisher = (eventPublisher == null) ? (e -> {}) : eventPublisher;
+        this.snapshotThreshold = snapshotThreshold;
 
         this.raftLog = new RaftLog();
         this.stateMachine = new RaftStateMachine();
@@ -102,8 +118,61 @@ public class RaftConsensusEngine implements TransportPort.RaftRpcHandler {
 
     public synchronized void checkElectionTimeout() {
         if (role != NodeRole.LEADER && hasElectionTimeoutElapsed()) {
-            log.info("[{}] Election timeout elapsed ({} ms). Starting election.", nodeId, electionTimeoutMs);
+            log.info("[{}] Election timeout elapsed ({} ms). Starting pre-vote check.", nodeId, electionTimeoutMs);
+            startPreVote();
+        }
+    }
+
+    public synchronized void startPreVote() {
+        if (peers.isEmpty()) {
             startElection();
+            return;
+        }
+
+        transitionTo(NodeRole.PRE_CANDIDATE);
+        resetElectionTimeout();
+        Term nextTerm = currentTerm.next();
+
+        int quorum = (peers.size() + 1) / 2 + 1;
+        AtomicInteger preVotesReceived = new AtomicInteger(1); // Self vote
+
+        RequestVoteArgs args = new RequestVoteArgs(
+                nextTerm,
+                nodeId,
+                raftLog.lastIndex(),
+                raftLog.lastTerm()
+        );
+
+        for (NodeId peer : peers) {
+            transport.sendPreVote(peer, args).whenComplete((result, ex) -> {
+                if (ex != null) {
+                    log.debug("[{}] Error requesting pre-vote from {}: {}", nodeId, peer, ex.getMessage());
+                    return;
+                }
+                handlePreVoteResponse(peer, result, nextTerm, quorum, preVotesReceived);
+            });
+        }
+    }
+
+    private synchronized void handlePreVoteResponse(
+            NodeId peer,
+            RequestVoteResult result,
+            Term candidateTerm,
+            int quorum,
+            AtomicInteger preVotesReceived
+    ) {
+        if (result.term().isGreaterThan(currentTerm)) {
+            stepDown(result.term());
+            return;
+        }
+
+        if (role == NodeRole.PRE_CANDIDATE && currentTerm.next().equals(candidateTerm) && result.voteGranted()) {
+            int currentVotes = preVotesReceived.incrementAndGet();
+            log.debug("[{}] Received pre-vote from {} (total: {}/{})", nodeId, peer, currentVotes, quorum);
+            if (currentVotes >= quorum) {
+                log.info("[{}] Pre-vote quorum granted ({}/{}). Starting full election.", nodeId, currentVotes, quorum);
+                startElection();
+            }
         }
     }
 
@@ -247,6 +316,25 @@ public class RaftConsensusEngine implements TransportPort.RaftRpcHandler {
             return !candidateIndex.isLessThan(ourIndex);
         }
         return false;
+    }
+
+    @Override
+    public synchronized RequestVoteResult handlePreVote(RequestVoteArgs args) {
+        if (args.term().isLessThan(currentTerm)) {
+            return new RequestVoteResult(currentTerm, false, nodeId);
+        }
+
+        // Under Pre-Vote, do NOT step down or increment term.
+        // Just verify whether the candidate's log is up-to-date and whether leader lease is expired.
+        boolean logIsUpToDate = isCandidateLogUpToDate(args.lastLogTerm(), args.lastLogIndex());
+        boolean leaderLeaseExpired = hasElectionTimeoutElapsed() || currentLeaderId == null;
+
+        if (logIsUpToDate && leaderLeaseExpired) {
+            log.debug("[{}] Granted pre-vote to {} for prospective term {}", nodeId, args.candidateId(), args.term());
+            return new RequestVoteResult(currentTerm, true, nodeId);
+        }
+
+        return new RequestVoteResult(currentTerm, false, nodeId);
     }
 
     @Override
@@ -442,6 +530,12 @@ public class RaftConsensusEngine implements TransportPort.RaftRpcHandler {
 
                 eventPublisher.accept(new RaftDomainEvent.LogCommittedEvent(nodeId, nextToApply, entry));
 
+                entriesAppliedSinceSnapshot++;
+                if (snapshotThreshold > 0 && entriesAppliedSinceSnapshot >= snapshotThreshold) {
+                    entriesAppliedSinceSnapshot = 0;
+                    triggerSnapshot();
+                }
+
                 CompletableFuture<StateMachineResult> pending = pendingProposals.remove(nextToApply);
                 if (pending != null) {
                     pending.complete(result);
@@ -450,6 +544,70 @@ public class RaftConsensusEngine implements TransportPort.RaftRpcHandler {
                 break;
             }
         }
+    }
+
+    public synchronized void triggerSnapshot() {
+        LogIndex lastApplied = raftLog.lastApplied();
+        if (lastApplied.value() <= 0) {
+            return;
+        }
+        Term lastTerm = raftLog.getTerm(lastApplied).orElse(Term.ZERO);
+        long now = clock.currentTimeMillis();
+        StateMachineSnapshot snap = stateMachine.snapshot(lastApplied, lastTerm, now);
+
+        Thread.ofVirtual().name("raft-snapshot-" + nodeId).start(() -> {
+            try {
+                storage.saveSnapshot(snap);
+                synchronized (RaftConsensusEngine.this) {
+                    raftLog.compact(lastApplied, lastTerm);
+                }
+                log.info("[{}] State machine snapshot taken at index {}, term {}", nodeId, lastApplied, lastTerm);
+            } catch (Exception e) {
+                log.error("[{}] Error persisting state machine snapshot: {}", nodeId, e.getMessage(), e);
+            }
+        });
+    }
+
+    public synchronized CompletableFuture<Void> readIndex() {
+        if (role != NodeRole.LEADER) {
+            CompletableFuture<Void> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new NotLeaderException(currentLeaderId));
+            return failed;
+        }
+
+        if (peers.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        int quorum = (peers.size() + 1) / 2 + 1;
+        AtomicInteger acks = new AtomicInteger(1);
+        Term leaderTerm = currentTerm;
+
+        for (NodeId peer : peers) {
+            LogIndex peerNext = nextIndex.getOrDefault(peer, LogIndex.of(1));
+            LogIndex prevIndex = peerNext.prev();
+            Term prevTerm = raftLog.getTerm(prevIndex).orElse(Term.ZERO);
+
+            AppendEntriesArgs heartbeat = new AppendEntriesArgs(
+                    leaderTerm,
+                    nodeId,
+                    prevIndex,
+                    prevTerm,
+                    List.of(),
+                    raftLog.commitIndex()
+            );
+
+            transport.sendAppendEntries(peer, heartbeat).whenComplete((res, ex) -> {
+                if (ex == null && res.success() && res.term().equals(leaderTerm)) {
+                    if (acks.incrementAndGet() >= quorum && !future.isDone()) {
+                        future.complete(null);
+                    }
+                }
+            });
+        }
+
+        return future;
     }
 
     private void persistMetadata() {

@@ -73,8 +73,10 @@ public class EmbeddedHttpServer implements AutoCloseable {
         server.createContext("/api/v1/locks/acquire", this::handleAcquireLock);
         server.createContext("/api/v1/locks/renew", this::handleRenewLock);
         server.createContext("/api/v1/locks/release", this::handleReleaseLock);
+        server.createContext("/api/v1/locks/waiters", this::handleWaitQueue);
         server.createContext("/api/v1/locks", this::handleListLocks);
         server.createContext("/api/v1/cluster/events", this::handleSseEvents);
+        server.createContext("/metrics", this::handleMetrics);
         server.createContext("/", this::handleDashboard);
     }
 
@@ -95,8 +97,66 @@ public class EmbeddedHttpServer implements AutoCloseable {
         status.put("fencingCounter", lockManager.getFencingCounter());
         status.put("peers", consensusEngine.peers().stream().map(NodeId::value).toList());
         status.put("activeLockCount", lockManager.getAllLocks().size());
+        status.put("waitQueueCount", lockManager.waitQueue().getAllQueueLengths().values().stream().mapToInt(Integer::intValue).sum());
 
         sendJsonResponse(exchange, 200, status);
+    }
+
+    private void handleWaitQueue(HttpExchange exchange) throws IOException {
+        addCorsHeaders(exchange);
+        if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(204, -1);
+            return;
+        }
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("queueLengths", lockManager.waitQueue().getAllQueueLengths());
+        sendJsonResponse(exchange, 200, resp);
+    }
+
+    private void handleMetrics(HttpExchange exchange) throws IOException {
+        addCorsHeaders(exchange);
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("# HELP shardlock_raft_term Current Raft election term\n");
+        sb.append("# TYPE shardlock_raft_term gauge\n");
+        sb.append("shardlock_raft_term ").append(consensusEngine.currentTerm().value()).append("\n\n");
+
+        sb.append("# HELP shardlock_raft_is_leader 1 if node is cluster leader, 0 otherwise\n");
+        sb.append("# TYPE shardlock_raft_is_leader gauge\n");
+        sb.append("shardlock_raft_is_leader ").append(consensusEngine.role() == com.engine.shardlock.domain.model.NodeRole.LEADER ? 1 : 0).append("\n\n");
+
+        sb.append("# HELP shardlock_raft_commit_index Highest log index known to be committed\n");
+        sb.append("# TYPE shardlock_raft_commit_index gauge\n");
+        sb.append("shardlock_raft_commit_index ").append(consensusEngine.raftLog().commitIndex().value()).append("\n\n");
+
+        sb.append("# HELP shardlock_raft_last_applied Highest log index applied to state machine\n");
+        sb.append("# TYPE shardlock_raft_last_applied gauge\n");
+        sb.append("shardlock_raft_last_applied ").append(consensusEngine.raftLog().lastApplied().value()).append("\n\n");
+
+        sb.append("# HELP shardlock_locks_active_total Current count of active leases\n");
+        sb.append("# TYPE shardlock_locks_active_total gauge\n");
+        sb.append("shardlock_locks_active_total ").append(lockManager.getAllLocks().size()).append("\n\n");
+
+        sb.append("# HELP shardlock_fencing_token_current Latest monotonically incremented fencing token\n");
+        sb.append("# TYPE shardlock_fencing_token_current counter\n");
+        sb.append("shardlock_fencing_token_current ").append(lockManager.getFencingCounter()).append("\n\n");
+
+        int waitQueueSize = lockManager.waitQueue().getAllQueueLengths().values().stream().mapToInt(Integer::intValue).sum();
+        sb.append("# HELP shardlock_wait_queue_length Total clients waiting in FIFO wait queue\n");
+        sb.append("# TYPE shardlock_wait_queue_length gauge\n");
+        sb.append("shardlock_wait_queue_length ").append(waitQueueSize).append("\n");
+
+        byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+        exchange.sendResponseHeaders(200, body.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+        }
     }
 
     private void handleListLocks(HttpExchange exchange) throws IOException {
@@ -118,6 +178,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
             item.put("ttlMs", r.ttlMs());
             item.put("remainingTtlMs", r.remainingTtlMs(now));
             item.put("expired", r.isExpired(now));
+            item.put("mode", r.lockMode().name());
             list.add(item);
         }
 
@@ -145,13 +206,25 @@ public class EmbeddedHttpServer implements AutoCloseable {
             String resource = (String) req.get("resource");
             String clientId = (String) req.get("clientId");
             long ttlMs = ((Number) req.getOrDefault("ttlMs", 10000)).longValue();
+            long waitTimeoutMs = ((Number) req.getOrDefault("waitTimeoutMs", 0)).longValue();
+            String modeStr = (String) req.getOrDefault("mode", "EXCLUSIVE");
+            com.engine.shardlock.domain.model.LockMode mode = "SHARED".equalsIgnoreCase(modeStr)
+                    ? com.engine.shardlock.domain.model.LockMode.SHARED
+                    : com.engine.shardlock.domain.model.LockMode.EXCLUSIVE;
 
             if (resource == null || resource.isBlank() || clientId == null || clientId.isBlank()) {
                 sendJsonResponse(exchange, 400, Map.of("error", "resource and clientId are required"));
                 return;
             }
 
-            StateMachineResult res = lockManager.acquireLock(resource, clientId, Duration.ofMillis(ttlMs)).get(5, TimeUnit.SECONDS);
+            long timeoutLimit = Math.max(5000, waitTimeoutMs + 5000);
+            StateMachineResult res = lockManager.acquireLock(
+                    resource,
+                    clientId,
+                    Duration.ofMillis(ttlMs),
+                    Duration.ofMillis(waitTimeoutMs),
+                    mode
+            ).get(timeoutLimit, TimeUnit.MILLISECONDS);
 
             if (res.isSuccess()) {
                 LockRecord rec = res.lockRecord();
@@ -162,6 +235,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
                 resp.put("fencingToken", rec.fencingToken().value());
                 resp.put("expiresAtMs", rec.expiresAtMs());
                 resp.put("ttlMs", rec.ttlMs());
+                resp.put("mode", rec.lockMode().name());
                 sendJsonResponse(exchange, 200, resp);
             } else {
                 Map<String, Object> resp = new LinkedHashMap<>();
@@ -404,98 +478,129 @@ public class EmbeddedHttpServer implements AutoCloseable {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ShardLock Cluster Monitor</title>
+  <title>ShardLock Distributed Cluster Monitor</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --card-bg: #161b22;
-      --border: #30363d;
-      --text: #c9d1d9;
-      --heading: #f0f6fc;
-      --accent: #58a6ff;
-      --leader: #238636;
-      --follower: #1f6feb;
-      --candidate: #d29922;
-      --danger: #da3633;
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --border: #1f2937;
+      --text: #9ca3af;
+      --heading: #f3f4f6;
+      --accent: #38bdf8;
+      --leader: #10b981;
+      --follower: #6366f1;
+      --candidate: #f59e0b;
+      --danger: #ef4444;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
-    body { background: var(--bg); color: var(--text); padding: 24px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; line-height: 1.5; }
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-    h1 { color: var(--heading); font-size: 24px; }
-    .status-badge { padding: 4px 12px; border-radius: 12px; font-weight: 600; font-size: 13px; text-transform: uppercase; }
-    .role-LEADER { background: var(--leader); color: #fff; }
-    .role-FOLLOWER { background: var(--follower); color: #fff; }
-    .role-CANDIDATE { background: var(--candidate); color: #fff; }
+    h1 { color: var(--heading); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+    .status-badge { padding: 4px 14px; border-radius: 9999px; font-weight: 600; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
+    .role-LEADER { background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid #10b981; }
+    .role-FOLLOWER { background: rgba(99,102,241,0.2); color: #818cf8; border: 1px solid #6366f1; }
+    .role-CANDIDATE, .role-PRE_CANDIDATE { background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid #f59e0b; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 24px; }
-    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
-    .card h2 { color: var(--heading); font-size: 16px; margin-bottom: 14px; }
-    .metric { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
-    .metric-value { font-weight: 600; color: var(--accent); }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
+    .card h2 { color: var(--heading); font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .metric { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
+    .metric-value { font-weight: 600; color: var(--accent); font-family: ui-monospace, monospace; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
     th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); }
-    th { color: var(--heading); font-weight: 600; }
-    .token-badge { background: #21262d; border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; font-family: monospace; }
-    .progress-bar-bg { width: 100%; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+    th { color: var(--heading); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .token-badge { background: #1f2937; border: 1px solid #374151; padding: 2px 8px; border-radius: 6px; font-family: ui-monospace, monospace; color: #f3f4f6; font-size: 12px; }
+    .mode-badge { padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .mode-EXCLUSIVE { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4); }
+    .mode-SHARED { background: rgba(56,189,248,0.2); color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); }
+    .progress-bar-bg { width: 100%; height: 5px; background: #1f2937; border-radius: 3px; overflow: hidden; margin-top: 4px; }
     .progress-bar-fill { height: 100%; background: var(--accent); width: 100%; transition: width 0.5s ease; }
-    .action-row { display: flex; gap: 10px; margin-top: 14px; }
-    input, button { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); background: #21262d; color: #fff; font-size: 14px; }
-    button { background: #238636; border-color: #2ea043; cursor: pointer; font-weight: 600; }
-    button:hover { background: #2ea043; }
-    button.release-btn { background: var(--danger); border-color: #f85149; }
-    .pulse { animation: pulse-anim 1.5s infinite; }
-    @keyframes pulse-anim { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    input, select, button { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); background: #1f2937; color: #f3f4f6; font-size: 13px; }
+    input:focus, select:focus { border-color: var(--accent); outline: none; }
+    button { background: #10b981; border-color: #059669; cursor: pointer; font-weight: 600; transition: all 0.2s; }
+    button:hover { background: #059669; }
+    button.release-btn { background: #ef4444; border-color: #dc2626; padding: 4px 10px; font-size: 12px; }
+    button.release-btn:hover { background: #dc2626; }
+    .timeline { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+    .timeline-item { padding: 8px 12px; border-radius: 6px; background: #1f2937; border-left: 3px solid var(--accent); display: flex; justify-content: space-between; align-items: center; }
+    .timeline-item.LeaderElectedEvent { border-left-color: #10b981; }
+    .timeline-item.LockAcquiredEvent { border-left-color: #38bdf8; }
+    .timeline-item.LockReleasedEvent { border-left-color: #9ca3af; }
+    .timeline-item.LockExpiredEvent { border-left-color: #ef4444; }
   </style>
 </head>
 <body>
   <header>
     <div>
-      <h1>ShardLock Consensus Daemon</h1>
-      <p style="font-size: 13px; color: #8b949e; margin-top: 4px;">Partition Lease Coordinator &amp; Monotonic Fencing Engine</p>
+      <h1>ShardLock Cluster Monitor</h1>
+      <p style="font-size: 13px; color: #6b7280; margin-top: 2px;">
+        Linearizable Lease Coordinator with Monotonic Fencing Tokens &bull;
+        <a href="/metrics" target="_blank" style="color:var(--accent); text-decoration:none;">Prometheus Metrics</a>
+      </p>
     </div>
-    <div id="role-badge" class="status-badge role-FOLLOWER">INITIALIZING</div>
+    <div id="role-badge" class="status-badge role-FOLLOWER">CONNECTING...</div>
   </header>
 
   <div class="grid">
     <div class="card">
-      <h2>Cluster Consensus</h2>
+      <h2>Raft Consensus State</h2>
       <div class="metric"><span>Node ID:</span><span id="metric-node-id" class="metric-value">-</span></div>
       <div class="metric"><span>Current Term:</span><span id="metric-term" class="metric-value">-</span></div>
-      <div class="metric"><span>Recognized Leader:</span><span id="metric-leader" class="metric-value">-</span></div>
+      <div class="metric"><span>Cluster Leader:</span><span id="metric-leader" class="metric-value">-</span></div>
       <div class="metric"><span>Commit Index:</span><span id="metric-commit" class="metric-value">-</span></div>
-      <div class="metric"><span>Fencing Token Counter:</span><span id="metric-fencing" class="metric-value">-</span></div>
+      <div class="metric"><span>Fencing Counter:</span><span id="metric-fencing" class="metric-value">-</span></div>
+      <div class="metric"><span>Connected Peers:</span><span id="metric-peers" class="metric-value">-</span></div>
     </div>
 
     <div class="card">
-      <h2>Acquire Resource Lock</h2>
+      <h2>Acquire / Wait Queue Request</h2>
       <div style="display:flex; flex-direction:column; gap:8px;">
-        <input type="text" id="acq-resource" placeholder="Resource Name (e.g. partition-0)" value="orders-partition-0">
+        <input type="text" id="acq-resource" placeholder="Resource Name" value="partition-0">
         <input type="text" id="acq-client" placeholder="Client ID" value="worker-console">
-        <input type="number" id="acq-ttl" placeholder="TTL in Milliseconds" value="10000">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <select id="acq-mode">
+            <option value="EXCLUSIVE">Exclusive Lock (Write)</option>
+            <option value="SHARED">Shared Lock (Read)</option>
+          </select>
+          <input type="number" id="acq-wait" placeholder="Wait Timeout (ms)" value="0">
+        </div>
+        <input type="number" id="acq-ttl" placeholder="Lease TTL (ms)" value="10000">
         <button onclick="acquireLock()">Acquire Lease</button>
       </div>
-      <div id="action-feedback" style="margin-top:10px; font-size:13px; color: #8b949e;"></div>
+      <div id="action-feedback" style="margin-top:10px; font-size:12px; color: #9ca3af;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Live SSE Event Stream</h2>
+      <div class="timeline" id="event-timeline">
+        <div style="text-align:center; color:#6b7280; padding: 20px;">Listening for cluster events...</div>
+      </div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>Active Partition Leases (<span id="lock-count">0</span>)</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Resource</th>
-          <th>Owner Client</th>
-          <th>Fencing Token</th>
-          <th>Remaining TTL</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="locks-body">
-        <tr><td colspan="5" style="text-align:center; color:#8b949e;">No active leases held</td></tr>
-      </tbody>
-    </table>
+  <div class="grid">
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2>Active Partition Leases (<span id="lock-count">0</span>)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Resource</th>
+            <th>Owner Client</th>
+            <th>Mode</th>
+            <th>Fencing Token</th>
+            <th>Remaining TTL</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="locks-body">
+          <tr><td colspan="6" style="text-align:center; color:#6b7280;">No active leases held</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <script>
+    const events = [];
+
     async function updateStatus() {
       try {
         const res = await fetch('/api/v1/cluster/status');
@@ -506,6 +611,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
         document.getElementById('metric-leader').textContent = data.leaderId || 'None (Electing)';
         document.getElementById('metric-commit').textContent = data.commitIndex;
         document.getElementById('metric-fencing').textContent = data.fencingCounter;
+        document.getElementById('metric-peers').textContent = (data.peers || []).join(', ') || 'Standalone';
 
         const badge = document.getElementById('role-badge');
         badge.textContent = data.role;
@@ -523,16 +629,18 @@ public class EmbeddedHttpServer implements AutoCloseable {
         document.getElementById('lock-count').textContent = locks.length;
         const tbody = document.getElementById('locks-body');
         if (locks.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#8b949e;">No active leases held</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#6b7280;">No active leases held</td></tr>';
           return;
         }
 
         let html = '';
         locks.forEach(l => {
           const pct = Math.min(100, Math.max(0, (l.remainingTtlMs / l.ttlMs) * 100));
+          const mode = l.mode || 'EXCLUSIVE';
           html += `<tr>
             <td><strong>${l.resource}</strong></td>
             <td>${l.ownerClientId}</td>
+            <td><span class="mode-badge mode-${mode}">${mode}</span></td>
             <td><span class="token-badge">Token #${l.fencingToken}</span></td>
             <td>
               <div>${(l.remainingTtlMs / 1000).toFixed(1)}s remaining</div>
@@ -552,29 +660,31 @@ public class EmbeddedHttpServer implements AutoCloseable {
     async function acquireLock() {
       const resource = document.getElementById('acq-resource').value;
       const clientId = document.getElementById('acq-client').value;
-      const ttlMs = parseInt(document.getElementById('acq-ttl').value, 10);
+      const mode = document.getElementById('acq-mode').value;
+      const waitTimeoutMs = parseInt(document.getElementById('acq-wait').value, 10) || 0;
+      const ttlMs = parseInt(document.getElementById('acq-ttl').value, 10) || 10000;
       const feedback = document.getElementById('action-feedback');
 
-      feedback.textContent = 'Acquiring lock...';
+      feedback.textContent = waitTimeoutMs > 0 ? 'Waiting in queue...' : 'Acquiring lease...';
       try {
         const res = await fetch('/api/v1/locks/acquire', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ resource, clientId, ttlMs })
+          body: JSON.stringify({ resource, clientId, mode, waitTimeoutMs, ttlMs })
         });
         const data = await res.json();
         if (res.ok) {
-          feedback.style.color = '#3fb950';
-          feedback.textContent = 'Lock Acquired! Fencing Token: ' + data.fencingToken;
+          feedback.style.color = '#34d399';
+          feedback.textContent = `Granted (${data.mode || 'EXCLUSIVE'})! Fencing Token: #${data.fencingToken}`;
         } else {
-          feedback.style.color = '#f85149';
-          feedback.textContent = 'Failed: ' + (data.message || data.error);
+          feedback.style.color = '#f87171';
+          feedback.textContent = 'Rejected: ' + (data.message || data.error);
         }
         updateLocks();
         updateStatus();
       } catch (e) {
-        feedback.style.color = '#f85149';
-        feedback.textContent = 'Network error: ' + e.message;
+        feedback.style.color = '#f87171';
+        feedback.textContent = 'Error: ' + e.message;
       }
     }
 
@@ -592,10 +702,30 @@ public class EmbeddedHttpServer implements AutoCloseable {
       }
     }
 
-    // SSE Event Listener for instant push updates
+    function addTimelineEvent(item) {
+      events.unshift(item);
+      if (events.length > 20) events.pop();
+
+      const container = document.getElementById('event-timeline');
+      container.innerHTML = events.map(e => `
+        <div class="timeline-item ${e.eventType}">
+          <div>
+            <strong>${e.eventType.replace('Event', '')}</strong>
+            <span style="color:#9ca3af; margin-left:6px;">${e.detail}</span>
+          </div>
+          <span style="color:#6b7280; font-family:ui-monospace, monospace;">${new Date(e.timestamp).toLocaleTimeString()}</span>
+        </div>
+      `).join('');
+    }
+
     function connectSse() {
       const es = new EventSource('/api/v1/cluster/events');
       es.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          let detail = ev.resource ? `${ev.resource} (#${ev.fencingToken})` : (ev.leaderId || ev.newRole || '');
+          addTimelineEvent({ eventType: ev.eventType, detail, timestamp: ev.timestamp || Date.now() });
+        } catch (err) {}
         updateStatus();
         updateLocks();
       };
@@ -607,7 +737,7 @@ public class EmbeddedHttpServer implements AutoCloseable {
     updateStatus();
     updateLocks();
     connectSse();
-    setInterval(updateStatus, 1000);
+    setInterval(updateStatus, 1500);
     setInterval(updateLocks, 1000);
   </script>
 </body>

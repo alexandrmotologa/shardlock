@@ -6,7 +6,10 @@ package com.engine.shardlock.domain.model;
 public enum CommandType {
     NOOP,
     ACQUIRE_LOCK,
+    ACQUIRE_SHARED_LOCK,
     RENEW_LOCK,
     RELEASE_LOCK,
-    EXPIRE_LOCK
+    EXPIRE_LOCK,
+    ACQUIRE_SEMAPHORE,
+    RELEASE_SEMAPHORE
 }

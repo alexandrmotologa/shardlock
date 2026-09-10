@@ -78,6 +78,25 @@ public class InMemoryNetworkSimulator {
         }
 
         @Override
+        public CompletableFuture<RequestVoteResult> sendPreVote(NodeId destination, RequestVoteArgs args) {
+            if (isBlocked(localNodeId, destination)) {
+                return CompletableFuture.failedFuture(new RuntimeException("Network link partitioned"));
+            }
+
+            RaftRpcHandler target = handlers.get(destination);
+            if (target == null) {
+                return CompletableFuture.failedFuture(new RuntimeException("Node unreachable: " + destination));
+            }
+
+            try {
+                RequestVoteResult res = target.handlePreVote(args);
+                return CompletableFuture.completedFuture(res);
+            } catch (Exception e) {
+                return CompletableFuture.failedFuture(e);
+            }
+        }
+
+        @Override
         public CompletableFuture<AppendEntriesResult> sendAppendEntries(NodeId destination, AppendEntriesArgs args) {
             if (isBlocked(localNodeId, destination)) {
                 return CompletableFuture.failedFuture(new RuntimeException("Network link partitioned"));

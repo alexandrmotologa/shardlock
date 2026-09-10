@@ -15,18 +15,23 @@ ShardLock addresses this by pairing Raft consensus with monotonic fencing tokens
 ## Key capabilities
 
 - Pure Raft consensus: Implements leader election, log replication, safety invariants, and commit index tracking.
+- Pre-Vote Protocol (Raft §9.6): Non-binding pre-candidate checks eliminate disruptive election cycles caused by partitioned or lagged nodes.
+- ReadIndex Linearizable Reads: Leader satisfies read queries by confirming consensus through a heartbeat round without appending new entries to the log.
+- Shared and Exclusive Locks: Supports concurrent shared read leases alongside exclusive write locks for reader-writer coordination.
+- Lock Wait Queue & Long-Polling: Contestants can wait in FIFO queue using `waitTimeoutMs` and are woken up immediately when the lease frees up.
 - Monotonic fencing tokens: Every lock acquisition increments a persistent cluster counter. Downstream stores can compare tokens on writes to reject stale updates.
 - Ephemeral client sessions: Leases expire automatically if a client fails to send periodic renewal heartbeats.
-- Write-Ahead Log (WAL): Log entries persist to disk with CRC32 checksums and length framing.
+- Write-Ahead Log (WAL) with Auto-Compaction: Log entries persist to disk with CRC32 checksums, length framing, and background snapshot rotation.
+- Prometheus Metrics: Exposes OpenMetrics / Prometheus metrics at `/metrics` for cluster monitoring.
 - Zero external framework runtime: Built with core Java 21 features, including Virtual Threads and the standard HTTP server.
-- Embedded live dashboard: A single-page web monitor served directly by each node, showing cluster topology, node roles, current terms, and active leases with live countdowns.
+- Embedded live dashboard: A single-page web monitor served directly by each node, showing cluster topology, SSE real-time event timeline, node roles, wait queue lengths, and active leases.
 
 ## Architecture
 
 ShardLock follows hexagonal architecture:
 
 - `domain`: Pure Java 21 model and state machine. It has zero external dependencies.
-- `application`: Orchestration services for consensus, lock coordination, and session management.
+- `application`: Orchestration services for consensus, lock coordination, wait queue handling, and session management.
 - `infrastructure`: Adapters for TCP network transport, disk storage (WAL and snapshots), and embedded HTTP endpoints.
 
 For details, read [docs/architecture.md](docs/architecture.md).
@@ -78,7 +83,7 @@ java -jar shardlock-core/target/shardlock-core-1.0.0-SNAPSHOT.jar \
 
 Open `http://localhost:8001` in your browser to inspect the cluster visualizer.
 
-## REST API
+## REST API & Observability
 
 ### Check cluster status
 
@@ -86,24 +91,18 @@ Open `http://localhost:8001` in your browser to inspect the cluster visualizer.
 curl -s http://localhost:8001/api/v1/cluster/status
 ```
 
-Example response:
-```json
-{
-  "nodeId": "node-1",
-  "role": "LEADER",
-  "currentTerm": 1,
-  "leaderId": "node-1",
-  "commitIndex": 12,
-  "peers": ["node-2", "node-3"]
-}
+### Prometheus Metrics
+
+```bash
+curl -s http://localhost:8001/metrics
 ```
 
-### Acquire a lock
+### Acquire an exclusive or shared lock with optional wait timeout
 
 ```bash
 curl -X POST http://localhost:8001/api/v1/locks/acquire \
   -H "Content-Type: application/json" \
-  -d '{"resource": "partition-orders-0", "clientId": "worker-worker-a", "ttlMs": 10000}'
+  -d '{"resource": "partition-orders-0", "clientId": "worker-a", "mode": "EXCLUSIVE", "waitTimeoutMs": 5000, "ttlMs": 10000}'
 ```
 
 Response:
@@ -111,10 +110,11 @@ Response:
 {
   "status": "ACQUIRED",
   "resource": "partition-orders-0",
-  "clientId": "worker-worker-a",
+  "clientId": "worker-a",
   "fencingToken": 101,
-  "leaseExpiresAtMs": 1773349200000,
-  "ttlMs": 10000
+  "expiresAtMs": 1773349200000,
+  "ttlMs": 10000,
+  "mode": "EXCLUSIVE"
 }
 ```
 
@@ -123,7 +123,7 @@ Response:
 ```bash
 curl -X POST http://localhost:8001/api/v1/locks/renew \
   -H "Content-Type: application/json" \
-  -d '{"resource": "partition-orders-0", "clientId": "worker-worker-a", "fencingToken": 101, "ttlMs": 10000}'
+  -d '{"resource": "partition-orders-0", "clientId": "worker-a", "fencingToken": 101, "ttlMs": 10000}'
 ```
 
 ### Release a lock
@@ -131,10 +131,25 @@ curl -X POST http://localhost:8001/api/v1/locks/renew \
 ```bash
 curl -X POST http://localhost:8001/api/v1/locks/release \
   -H "Content-Type: application/json" \
-  -d '{"resource": "partition-orders-0", "clientId": "worker-worker-a", "fencingToken": 101}'
+  -d '{"resource": "partition-orders-0", "clientId": "worker-a", "fencingToken": 101}'
 ```
 
-## Java client example
+## Standalone CLI Tool
+
+Use `ShardLockCli` for terminal management:
+
+```bash
+# Check cluster status
+java -cp shardlock-client/target/shardlock-client-1.0.0-SNAPSHOT.jar com.engine.shardlock.client.cli.ShardLockCli status
+
+# Acquire lease with 5-second wait queue long-polling
+java -cp shardlock-client/target/shardlock-client-1.0.0-SNAPSHOT.jar com.engine.shardlock.client.cli.ShardLockCli acquire orders-0 10000 5000 EXCLUSIVE
+
+# List all active leases
+java -cp shardlock-client/target/shardlock-client-1.0.0-SNAPSHOT.jar com.engine.shardlock.client.cli.ShardLockCli list
+```
+
+## Java Client Example
 
 ```java
 ShardLockClient client = ShardLockClient.builder()
@@ -148,6 +163,16 @@ client.tryWithLock("orders-partition-0", Duration.ofSeconds(10), lockHandle -> {
     storageService.writeWithToken("orders-partition-0", payload, token);
 });
 ```
+
+## Downstream SQL Fencing Guard (Martin Kleppmann GC Pause Defense)
+
+```sql
+UPDATE partition_state 
+SET payload = ?, fencing_token = ? 
+WHERE partition_id = ? AND fencing_token < ?;
+```
+
+If a worker experiences an unexpected stop-the-world GC pause and attempts to write with an older token, the query affects 0 rows, preventing split-brain state corruption. See `PostgresFencingGuardSample.java` for a complete working demonstration.
 
 ## License
 

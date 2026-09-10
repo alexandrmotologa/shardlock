@@ -51,11 +51,16 @@ public class ShardLockClient implements AutoCloseable {
     }
 
     public Optional<LockHandle> acquire(String resource, Duration ttl) {
-        Map<String, Object> reqBody = Map.of(
-                "resource", resource,
-                "clientId", clientId,
-                "ttlMs", ttl.toMillis()
-        );
+        return acquire(resource, ttl, Duration.ZERO, "EXCLUSIVE");
+    }
+
+    public Optional<LockHandle> acquire(String resource, Duration ttl, Duration waitTimeout, String mode) {
+        Map<String, Object> reqBody = new LinkedHashMap<>();
+        reqBody.put("resource", resource);
+        reqBody.put("clientId", clientId);
+        reqBody.put("ttlMs", ttl.toMillis());
+        reqBody.put("waitTimeoutMs", waitTimeout.toMillis());
+        reqBody.put("mode", mode != null ? mode : "EXCLUSIVE");
 
         try {
             HttpResponse<String> resp = sendRequestWithFailover("/api/v1/locks/acquire", reqBody);
@@ -63,10 +68,11 @@ public class ShardLockClient implements AutoCloseable {
                 Map<String, Object> data = mapper.readValue(resp.body(), Map.class);
                 long token = ((Number) data.get("fencingToken")).longValue();
                 long expiresAtMs = ((Number) data.get("expiresAtMs")).longValue();
-                LockHandle handle = new LockHandle(resource, clientId, token, expiresAtMs, ttl);
+                String grantedMode = (String) data.getOrDefault("mode", mode != null ? mode : "EXCLUSIVE");
+                LockHandle handle = new LockHandle(resource, clientId, token, expiresAtMs, ttl, grantedMode);
                 return Optional.of(handle);
             } else if (resp.statusCode() == 409) {
-                log.debug("Resource '{}' is currently held by another worker", resource);
+                log.debug("Resource '{}' is currently held or wait queue expired", resource);
                 return Optional.empty();
             } else {
                 log.warn("Acquire lock failed with status {}: {}", resp.statusCode(), resp.body());
@@ -75,6 +81,23 @@ public class ShardLockClient implements AutoCloseable {
         } catch (Exception e) {
             log.error("Failed to acquire lock for '{}': {}", resource, e.getMessage());
             return Optional.empty();
+        }
+    }
+
+    public Optional<LockHandle> acquireShared(String resource, Duration ttl, Duration waitTimeout) {
+        return acquire(resource, ttl, waitTimeout, "SHARED");
+    }
+
+    public boolean tryWithSharedLock(String resource, Duration ttl, Consumer<LockHandle> action) {
+        Optional<LockHandle> handleOpt = acquireShared(resource, ttl, Duration.ZERO);
+        if (handleOpt.isEmpty()) {
+            return false;
+        }
+        try {
+            action.accept(handleOpt.get());
+            return true;
+        } finally {
+            release(handleOpt.get());
         }
     }
 
@@ -234,6 +257,46 @@ public class ShardLockClient implements AutoCloseable {
             knownLeaderEndpoint.set(base);
         } catch (Exception ignored) {
         }
+    }
+
+    public String getMetrics() throws Exception {
+        HttpResponse<String> resp = sendGetRequestWithFailover("/metrics");
+        return resp.body();
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getClusterStatus() throws Exception {
+        HttpResponse<String> resp = sendGetRequestWithFailover("/api/v1/cluster/status");
+        return mapper.readValue(resp.body(), Map.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> listLocks() throws Exception {
+        HttpResponse<String> resp = sendGetRequestWithFailover("/api/v1/locks");
+        return mapper.readValue(resp.body(), List.class);
+    }
+
+    private HttpResponse<String> sendGetRequestWithFailover(String path) throws Exception {
+        List<String> targetUrls = buildCandidateUrls(path);
+        Exception lastException = null;
+        for (String url : targetUrls) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .timeout(requestTimeout)
+                        .GET()
+                        .build();
+
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200) {
+                    updateKnownLeaderFromUrl(url);
+                    return resp;
+                }
+            } catch (Exception e) {
+                lastException = e;
+            }
+        }
+        throw new IOException("Unable to reach ShardLock endpoint: " + path, lastException);
     }
 
     private String cleanUrl(String ep) {
