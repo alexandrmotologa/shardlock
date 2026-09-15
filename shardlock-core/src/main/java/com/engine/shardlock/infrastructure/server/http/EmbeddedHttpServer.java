@@ -638,6 +638,13 @@ public class EmbeddedHttpServer implements AutoCloseable {
         </tbody>
       </table>
     </div>
+
+    <div class="card" style="grid-column: 1 / -1; margin-top: 16px;">
+      <h2><span>FIFO Lock Wait Queues</span> <span class="token-badge" id="waiter-count">0 Queued</span></h2>
+      <div id="waiter-list" style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px;">
+        <span style="color:#6b7280; font-size:13px;">No clients currently queued. Long-polling requests with waitTimeoutMs appear here.</span>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -694,6 +701,26 @@ public class EmbeddedHttpServer implements AutoCloseable {
           </tr>`;
         });
         tbody.innerHTML = html;
+
+        const wRes = await fetch('/api/v1/locks/waiters');
+        if (wRes.ok) {
+          const wData = await wRes.json();
+          const qMap = wData.queueLengths || {};
+          const keys = Object.keys(qMap);
+          const totalWaiting = keys.reduce((acc, k) => acc + qMap[k], 0);
+          document.getElementById('waiter-count').textContent = totalWaiting + ' Queued';
+          const wContainer = document.getElementById('waiter-list');
+          if (keys.length === 0) {
+            wContainer.innerHTML = '<span style="color:#6b7280; font-size:13px;">No clients currently queued. Long-polling requests with waitTimeoutMs appear here.</span>';
+          } else {
+            wContainer.innerHTML = keys.map(k => `
+              <div style="background:#1f2937; border:1px solid #374151; padding:6px 12px; border-radius:6px; display:flex; align-items:center; gap:8px;">
+                <span style="color:#f3f4f6; font-weight:600; font-size:13px;">${k}</span>
+                <span style="background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid #f59e0b; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700;">${qMap[k]} queued</span>
+              </div>
+            `).join('');
+          }
+        }
       } catch (e) {
         console.debug('Locks update error', e);
       }

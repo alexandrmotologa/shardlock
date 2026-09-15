@@ -102,10 +102,27 @@ java -jar shardlock-core/target/shardlock-core-1.0.0-SNAPSHOT.jar \
 Each node serves an embedded, zero-dependency visualizer running on Java 21 Virtual Threads with Server-Sent Events (SSE). It gives real-time visibility into Raft topology, leadership terms, active exclusive and shared partition leases, monotonic fencing tokens, and replication event logs:
 
 <p align="center">
-  <img src="docs/images/dashboard-preview.png" alt="ShardLock Live Cluster Dashboard Preview" width="100%" style="border-radius: 8px; border: 1px solid #1f2937;" />
+  <img src="docs/images/shardlock_demo.gif" alt="ShardLock Live Cluster Visualizer & Lease Acquisition Demo" width="100%" style="border-radius: 8px; border: 1px solid #1f2937; box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5);" />
 </p>
 
 Open `http://localhost:8001` in your browser to inspect the cluster visualizer.
+
+### Screenshots & Architecture Views
+
+<p align="center">
+  <strong>Cluster Topology, Term Health & Active Leases</strong><br>
+  <img src="docs/images/dashboard-preview.png" alt="ShardLock Cluster Topology & Leases" width="100%" style="border-radius: 8px; border: 1px solid #1f2937; margin-top: 6px; margin-bottom: 20px;" />
+</p>
+
+<p align="center">
+  <strong>FIFO Lock Wait Queues & Contention Long-Polling</strong><br>
+  <img src="docs/images/dashboard-wait-queue.png" alt="ShardLock FIFO Wait Queues" width="100%" style="border-radius: 8px; border: 1px solid #1f2937; margin-top: 6px; margin-bottom: 20px;" />
+</p>
+
+<p align="center">
+  <strong>Standalone CLI & Downstream PostgreSQL Fencing Guard</strong><br>
+  <img src="docs/images/cli-terminal-preview.png" alt="ShardLock CLI & Fencing Guard Demonstration" width="100%" style="border-radius: 8px; border: 1px solid #1f2937; margin-top: 6px; margin-bottom: 20px;" />
+</p>
 
 ## REST API & Observability
 
