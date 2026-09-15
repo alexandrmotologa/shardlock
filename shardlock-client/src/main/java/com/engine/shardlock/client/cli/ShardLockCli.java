@@ -30,6 +30,8 @@ public class ShardLockCli {
                 if (i + 1 < args.length) {
                     endpoint = args[++i];
                 }
+            } else if (args[i].toLowerCase().startsWith("--endpoint=")) {
+                endpoint = args[i].substring("--endpoint=".length());
             } else {
                 remainingArgs.add(args[i]);
             }
