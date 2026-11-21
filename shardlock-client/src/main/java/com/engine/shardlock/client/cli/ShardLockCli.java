@@ -16,8 +16,23 @@ import java.util.*;
  */
 public class ShardLockCli {
 
+    public static final String VERSION = "1.0.0";
+
     public static void main(String[] args) {
-        if (args.length == 0) {
+        if (args != null && args.length > 0) {
+            for (String arg : args) {
+                if ("--version".equalsIgnoreCase(arg) || "-v".equalsIgnoreCase(arg) || "version".equalsIgnoreCase(arg)) {
+                    System.out.println("ShardLock version " + VERSION);
+                    return;
+                }
+                if ("--help".equalsIgnoreCase(arg) || "-h".equalsIgnoreCase(arg) || "help".equalsIgnoreCase(arg)) {
+                    printUsage();
+                    return;
+                }
+            }
+        }
+
+        if (args == null || args.length == 0) {
             printUsage();
             System.exit(1);
         }
@@ -210,6 +225,11 @@ Commands:
   renew <resource> <clientId> <token> [ttlMs]     Renew lease expiry before timeout
   release <resource> <clientId> <token>           Release actively held lease
   watch                                           Stream real-time SSE consensus events
+  version                                         Print version information and exit
+
+Options:
+  -v, --version                                   Print version information and exit
+  -h, --help                                      Print this help message and exit
 
 Environment:
   SHARDLOCK_URL                                   Default cluster endpoint (default: http://localhost:8001)

@@ -16,9 +16,23 @@ import java.util.Map;
  */
 public class ShardLockServerCli {
 
+    public static final String VERSION = "1.0.0";
     private static final Logger log = LoggerFactory.getLogger(ShardLockServerCli.class);
 
     public static void main(String[] args) {
+        if (args != null && args.length > 0) {
+            for (String arg : args) {
+                if ("--version".equalsIgnoreCase(arg) || "-v".equalsIgnoreCase(arg) || "version".equalsIgnoreCase(arg)) {
+                    System.out.println("shardlock-core version " + VERSION);
+                    return;
+                }
+                if ("--help".equalsIgnoreCase(arg) || "-h".equalsIgnoreCase(arg) || "help".equalsIgnoreCase(arg)) {
+                    printUsage();
+                    return;
+                }
+            }
+        }
+
         Map<String, String> params = parseArgs(args);
 
         String nodeIdStr = params.getOrDefault("node-id", "node-1");
@@ -89,5 +103,21 @@ public class ShardLockServerCli {
             }
         }
         return map;
+    }
+
+    private static void printUsage() {
+        System.out.println("ShardLock Server Daemon - Distributed Consensus & Partition Lease Daemon");
+        System.out.println();
+        System.out.println("Usage:");
+        System.out.println("  java -jar shardlock-core.jar [options]");
+        System.out.println();
+        System.out.println("Options:");
+        System.out.println("  --node-id=<id>           Cluster node identifier (default: node-1)");
+        System.out.println("  --http-port=<port>       HTTP API port (default: 8001)");
+        System.out.println("  --peer-port=<port>       Peer TCP port (default: 9001)");
+        System.out.println("  --data-dir=<path>        Data directory for WAL storage");
+        System.out.println("  --peers=<list>           Comma-separated peer endpoints (e.g. node-2:localhost:9002)");
+        System.out.println("  -v, --version, version   Print version information and exit");
+        System.out.println("  -h, --help, help         Print this help message and exit");
     }
 }

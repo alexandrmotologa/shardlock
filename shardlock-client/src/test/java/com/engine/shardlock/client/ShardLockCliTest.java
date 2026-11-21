@@ -30,4 +30,44 @@ class ShardLockCliTest {
         assertFalse(zombieWrite, "Database must reject stale write where client token <= current token");
         assertEquals("Updated payload", db.get("part-0").payload(), "Data must remain uncorrupted");
     }
+
+    @Test
+    @DisplayName("ShardLock CLI prints version with --version, -v, and version")
+    void cliPrintsVersion() {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream originalOut = System.out;
+        try {
+            System.setOut(new java.io.PrintStream(out));
+            ShardLockCli.main(new String[]{"--version"});
+            assertTrue(out.toString().contains("ShardLock version 1.0.0"));
+
+            out.reset();
+            ShardLockCli.main(new String[]{"-v"});
+            assertTrue(out.toString().contains("ShardLock version 1.0.0"));
+
+            out.reset();
+            ShardLockCli.main(new String[]{"version"});
+            assertTrue(out.toString().contains("ShardLock version 1.0.0"));
+        } finally {
+            System.setOut(originalOut);
+        }
+    }
+
+    @Test
+    @DisplayName("ShardLock CLI prints help with --help and -h")
+    void cliPrintsHelp() {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream originalOut = System.out;
+        try {
+            System.setOut(new java.io.PrintStream(out));
+            ShardLockCli.main(new String[]{"--help"});
+            assertTrue(out.toString().contains("=== ShardLock CLI Usage ==="));
+
+            out.reset();
+            ShardLockCli.main(new String[]{"-h"});
+            assertTrue(out.toString().contains("=== ShardLock CLI Usage ==="));
+        } finally {
+            System.setOut(originalOut);
+        }
+    }
 }
